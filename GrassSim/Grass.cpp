@@ -211,10 +211,18 @@ void generateGrass(int verticesNum)
     verticesPre = new float[verticesNum * 12];
 	indices = new int[indicesNum];
 
+    memset(vertices, 0, sizeof(float)* verticesNum *12);
+    memset(verticesPre, 0, sizeof(float)* verticesNum *12);
+    memset(indices, 0, sizeof(float)* verticesNum *12);
+
 	RestLength = new float[verticesNum];
 	Binormal = new vec4[1];
 	RefVector = new vec4[verticesNum];
 	GlobalFrames = new vec4[verticesNum];
+
+    memset(RestLength, 0, sizeof(float) * verticesNum);
+    memset(RefVector, 0, sizeof(float) * verticesNum);
+    memset(GlobalFrames, 0, sizeof(float) * verticesNum);
 
 	int *ind = indices;
 	for(int j = 0; j < verticesNum-1; j++)

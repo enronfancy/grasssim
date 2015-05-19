@@ -18,17 +18,26 @@ extern float *vertices;
 extern float *verticesPre;
 extern int *indices;
 
-vec4* vp  = (vec4*)verticesPre;
-vec4* v = (vec4*)vertices;
+
+
+extern float *RestLength;
+extern vec4 *Binormal;
+extern vec4 *RefVector;
+extern vec4 *GlobalFrames;
 
 vec4 sharedPos[128];
+vec4 sharedLength[128];
+
+vec4* v  = (vec4*)vertices;
+vec4* vp  = (vec4*)verticesPre;
+
 
 vec4 wind = vec4(0.0f, 0.0f, 0.0f, 0.0f);
 vec4 gravity = vec4(0.0f, 0.0f, 0.0f, 0.0f);
 
 int numELCIter = 2;
 int numLSCIter = 3;
-int bCollision;    
+int bCollision = true;    
 float timestep = 1.0f/60.0f;
 float elpasedTime = 20.0f;    
 float damping = 0.08f;
@@ -182,9 +191,9 @@ vec4 Integrate(vec4 curPosition, vec4 oldPosition, vec4 force, int globalVertexI
     vec4 outputPos = curPosition;
 
     //force.xyz += gravity.xyz;
-    outputPos.x = curPosition.x + (1.0 - dampingCoeff)*(curPosition.x - oldPosition.x) + force.x*timestep*timestep; 
-    outputPos.y = curPosition.y + (1.0 - dampingCoeff)*(curPosition.y - oldPosition.y) + force.y*timestep*timestep; 
-    outputPos.z = curPosition.z + (1.0 - dampingCoeff)*(curPosition.z - oldPosition.z) + force.z*timestep*timestep; 
+    outputPos.x = curPosition.x + (1.0f - dampingCoeff)*(curPosition.x - oldPosition.x) + force.x*timestep*timestep; 
+    outputPos.y = curPosition.y + (1.0f - dampingCoeff)*(curPosition.y - oldPosition.y) + force.y*timestep*timestep; 
+    outputPos.z = curPosition.z + (1.0f - dampingCoeff)*(curPosition.z - oldPosition.z) + force.z*timestep*timestep; 
     return outputPos;  
 }
 
@@ -307,7 +316,7 @@ void UpdateFinalVertexPositions(vec4 oldPosition, vec4 newPosition, int globalVe
 //--------------------------------------------------------------------------------------
 void IntegrationAndGlobalShapeConstraints(int vertexInd)
 {
-    //uint globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
+    int globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
     //CalcIndicesInVertexLevel(GIndex, GId.x, globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem);
     
     vec4 currentPos = vec4(0, 0, 0, 0); // position when this step starts. In other words, a position from the last step. 
@@ -318,7 +327,7 @@ void IntegrationAndGlobalShapeConstraints(int vertexInd)
 
     //GroupMemoryBarrierWithGroupSync();
 
-    if ( vertexInd == 0 || localVertexIndex == 1 )
+    if ( vertexInd == 0 || vertexInd == 1 )
     {
         sharedPos[vertexInd].w = 0;
         currentPos.w = 0;
@@ -339,5 +348,267 @@ void IntegrationAndGlobalShapeConstraints(int vertexInd)
         sharedPos[vertexInd] = Integrate(currentPos, oldPos, force, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, dampingCoeff); 
     
     // update global position buffers
-    UpdateFinalVertexPositions(currentPos, sharedPos[indexForSharedMem], globalVertexIndex, localVertexIndex, numVerticesInTheStrand);
+    UpdateFinalVertexPositions(currentPos, sharedPos[vertexInd], globalVertexIndex, localVertexIndex, numVerticesInTheStrand);
+}
+
+
+//--------------------------------------------------------------------------------------
+// 
+//  LocalShapeConstraints
+//
+//  Compute shader to maintain the local shape constraints.
+//
+// One thread computes one strand.
+//
+//--------------------------------------------------------------------------------------
+void LocalShapeConstraints(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
+{
+    int local_id = GIndex; 
+    int group_id = GId.x;
+
+    int globalStrandIndex = THREAD_GROUP_SIZE*group_id + local_id;
+    int numVerticesInTheStrand = NUM_VERTS_PER_STRAND;
+    int globalRootVertexIndex = numVerticesInTheStrand * globalStrandIndex;
+
+    //--------------------------------------------
+    // Local shape constraint for bending/twisting 
+    //--------------------------------------------    
+    for ( int iter = 0; iter < numLSCIter; iter++ )
+    {
+        vec4 pos_minus_one = v[vertexInd * 3];
+        vec4 pos = v[(vertexInd + 1) * 3];
+        vec4 pos_plus_one;
+        int globalVertexIndex = 0;
+        vec4 rotGlobal = GlobalFrames[vertexInd];
+
+        //g_DebugBuffer[globalStrandIndex] = pos;
+                
+        for ( int localVertexIndex = 1; localVertexIndex < numVerticesInTheStrand-1; localVertexIndex++ )
+        {
+            globalVertexIndex = globalRootVertexIndex + localVertexIndex;
+            pos_plus_one = v[(globalVertexIndex + 1) * 3];
+
+            //--------------------------------
+            // Update position i and i_plus_1
+            //--------------------------------
+            vec4 rotGlobalWorld = rotGlobal; 
+            vec3 orgPos_i_plus_1_InLocalFrame_i = RefVector[globalVertexIndex + bladeOffset + 1]._xyz(); 
+            vec3 orgPos_i_plus_1_InGlobalFrame = MultQuaternionAndVector(rotGlobalWorld, orgPos_i_plus_1_InLocalFrame_i) + pos._xyz();
+
+            vec3 del = (orgPos_i_plus_1_InGlobalFrame - pos_plus_one._xyz()) * stiffnessLSC * 0.5f ;
+
+            // Without the following line, sudden jerky movement can be observed when a new cell goes under simulation due to numeric error. 
+            if ( del.Length() > 0.0015 )
+            {
+                if ( IsMovable(pos) )
+                {
+                    pos.x -= del.x;
+                    pos.y -= del.y;
+                    pos.z -= del.z;
+
+                }
+                
+                pos.x -= del.x;
+                pos.y -= del.y;
+                pos.z -= del.z;
+                
+
+                if ( IsMovable(pos_plus_one) )
+                {
+                    pos_plus_one.x += del.x;
+                    pos_plus_one.y += del.y;
+                    pos_plus_one.z += del.z;
+                }
+            }
+    
+            //---------------------------
+            // Update local/global frames
+            //---------------------------
+            vec4 invRotGlobalWorld = InverseQuaternion(rotGlobalWorld);   
+            vec3 vec = normalize(pos_plus_one._xyz() - pos._xyz());     
+    
+            vec3 x_i_plus_1_frame_i = normalize(MultQuaternionAndVector(invRotGlobalWorld, vec));
+            vec3 e = vec3(1.0f, 0, 0);
+            vec3 rotAxis = cross(e, x_i_plus_1_frame_i);
+    
+            if ( rotAxis.Length() > 0.001 )
+            {
+                float angle_radian = acos(dot(e, x_i_plus_1_frame_i));
+                rotAxis = normalize(rotAxis);
+
+                vec4 localRot = MakeQuaternion(angle_radian, rotAxis);
+                
+                rotGlobal = MultQuaternionAndQuaternion(rotGlobal, localRot);
+            }   
+
+            v[(vertexInd) * 3].x = pos.x;
+            v[(vertexInd) * 3].y = pos.y;    
+            v[(vertexInd) * 3].z = pos.z;    
+
+            v[(vertexInd + 1) * 3].x = pos_plus_one.x;
+            v[(vertexInd + 1) * 3].y = pos_plus_one.y;
+            v[(vertexInd + 1) * 3].z = pos_plus_one.z;
+
+            pos_minus_one = pos;
+            pos = pos_plus_one;
+        }     
+    }
+
+    return;
+}
+
+//--------------------------------------------------------------------------------------
+// 
+//  LengthConstriantsAndWind
+//
+//  Compute shader to move the vertex position based on wind and maintains the lenght constraints.
+//
+// One thread computes one vertex.
+//
+//--------------------------------------------------------------------------------------
+void LengthConstriantsAndWind(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
+{
+    int globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
+    CalcIndicesInVertexLevel(GIndex, GId.x, globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem);
+        
+    int numOfStrandsPerThreadGroup = NUM_STRANDS_PER_GROUP;
+        
+    //------------------------------
+    // Copy data into shared memory
+    //------------------------------
+    {
+        sharedPos[vertexInd] = v[vertexInd * 3];
+        sharedLength[vertexInd] = RestLength[vertexInd]; 
+        //g_DebugBuffer[globalVertexIndex] = g_HairRestLengthSRV[globalVertexIndex + bladeOffset];
+    }
+    
+    
+    //GroupMemoryBarrierWithGroupSync();
+
+    ////-------
+    //// Wind
+    ////-------
+    //if ( IsMovable(sharedPos[indexForSharedMem])  )
+    //{
+    //  vec4 ran = g_Random[globalVertexIndex];
+    //  float dx0 = ran.y*sin( TimeVals.y * ran.x ) * 0.004;
+    //  float dx1 = sin( TimeVals.y + ran.z) * 0.0007;
+    //  sharedPos[indexForSharedMem]._xyz() += vec4((dx0+dx1), 0, 0,  0);
+    //}
+    
+    //GroupMemoryBarrierWithGroupSync();
+
+    //----------------------------
+    // Enforce length constraints
+    //----------------------------
+    int a = floor(numVerticesInTheStrand/2.0f);
+    int b = floor((numVerticesInTheStrand-1)/2.0f); 
+        
+    for ( int iterationE=0; iterationE < numELCIter; iterationE++ )
+    {       
+        int sharedIndex = 2*localVertexIndex * numOfStrandsPerThreadGroup + localStrandIndex;
+
+        if( localVertexIndex < a )
+            ApplyDistanceConstraint(sharedPos[sharedIndex], sharedPos[sharedIndex+numOfStrandsPerThreadGroup], sharedLength[sharedIndex].x);
+
+        //GroupMemoryBarrierWithGroupSync();
+
+        if( localVertexIndex < b )
+            ApplyDistanceConstraint(sharedPos[sharedIndex+numOfStrandsPerThreadGroup], sharedPos[sharedIndex+numOfStrandsPerThreadGroup*2], sharedLength[sharedIndex+numOfStrandsPerThreadGroup].x);
+
+        //GroupMemoryBarrierWithGroupSync();
+    }
+
+    //---------------------------------------
+    // update global position buffers
+    //---------------------------------------
+    if ( vertexInd < numVerticesInTheStrand )
+    v[vertexInd * 3] = sharedPos[vertexInd];
+    
+    return;
+}
+
+
+void CollisionAndTangents(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
+{
+    int globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
+    CalcIndicesInVertexLevel(GIndex, GId.x, globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem);
+
+    int numOfStrandsPerThreadGroup = NUM_STRANDS_PER_GROUP;
+
+    //------------------------------
+    // Copy data into shared memory
+    //------------------------------
+    if (vertexInd < numVerticesInTheStrand )
+    {
+        sharedPos[vertexInd] = v[vertexInd * 3];
+    }
+
+    vec4 oldPos = vp[vertexInd];
+        
+    //GroupMemoryBarrierWithGroupSync();
+    
+    // collision handling with spheres (rocks)
+    if ( bCollision )
+    {
+        for ( int i = 0; i < NUM_OF_ROCKS; i++ )
+        {
+            sharedPos[vertexInd].x = SphereCollision(sharedPos[indexForSharedMem], vec4(1,1,1,1)).x;
+            sharedPos[vertexInd].y = SphereCollision(sharedPos[indexForSharedMem], vec4(1,1,1,1)).y;
+            sharedPos[vertexInd].z = SphereCollision(sharedPos[indexForSharedMem], vec4(1,1,1,1)).z;
+        }
+    }
+
+    //GroupMemoryBarrierWithGroupSync();
+    
+    //-----------------------------
+    // Compute normal and tangent
+    //-----------------------------
+    vec3 tangent;
+    vec3 binormal = Binormal[0]._xyz();
+    vec3 normal;
+
+    if ( vertexInd == 0 )
+    {
+        tangent = sharedPos[indexForSharedMem+numOfStrandsPerThreadGroup]._xyz() - sharedPos[indexForSharedMem]._xyz();
+    }
+    else if ( vertexInd == numVerticesInTheStrand - 1 )
+    {
+        tangent = sharedPos[indexForSharedMem]._xyz() - sharedPos[indexForSharedMem-numOfStrandsPerThreadGroup]._xyz();
+    }
+    else 
+    {
+        vec3 t0 = sharedPos[indexForSharedMem+numOfStrandsPerThreadGroup]._xyz() - sharedPos[indexForSharedMem]._xyz();
+        vec3 t1 = sharedPos[indexForSharedMem]._xyz() - sharedPos[indexForSharedMem-numOfStrandsPerThreadGroup]._xyz();
+        tangent = t0 + t1;
+    }
+
+    normal =  cross(tangent, binormal);
+    float len = std::max(normal.Length(), 1e-7f);
+    normal = normal / len;
+
+    v[globalVertexIndex * 3 + 2].x = normalize(tangent).x;
+    v[globalVertexIndex * 3 + 2].y = normalize(tangent).y;
+    v[globalVertexIndex * 3 + 2].z = normalize(tangent).z;
+    v[globalVertexIndex * 3 + 2].w = 1.0f - ballLeftTime;
+
+    v[globalVertexIndex * 3 + 1].x = normal.x;
+    v[globalVertexIndex * 3 + 1].y = normal.y;
+    v[globalVertexIndex * 3 + 1].z = normal.z;
+
+    //---------------------------------------
+    // update global position buffers
+    //---------------------------------------
+    if ( vertexInd < numVerticesInTheStrand )
+        {
+            // This code would blend position towards initial based on fractional time 
+            // left after leaving the cell.  However, it would then feed into the simulation again,
+            // turning this into something resembling a ramped constraint. This is somewhat redundant with 
+            // the ramped local constraint idea that Dongsoo suggested.
+            // g_HairVertices[globalVertexIndex * 3] = sharedPos[indexForSharedMem] * (1.0f - ballLeftTime) + g_InitialHairPositions[globalVertexIndex] * ballLeftTime;
+                
+            v[globalVertexIndex * 3] = sharedPos[indexForSharedMem];
+        }
+    
+    return;
 }
