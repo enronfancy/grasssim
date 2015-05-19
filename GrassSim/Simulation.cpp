@@ -14,6 +14,8 @@
 
 #define MAX_COLLISION_BALLS 64
 
+static vec4 sp = vec4(0,0,-2, 0.25);
+
 extern float *vertices;
 extern float *verticesPre;
 extern int *indices;
@@ -58,6 +60,7 @@ bool IsMovable(vec4 particle)
         return true;
     return false;      
 }
+
 
 vec2 ConstraintMultiplier(vec4 particle0, vec4 particle1)
 {
@@ -186,7 +189,7 @@ void CalcIndicesInVertexLevel(int local_id, int group_id, int &globalStrandIndex
     globalVertexIndex = globalStrandIndex * numVerticesInTheStrand + localVertexIndex;
 }
 
-vec4 Integrate(vec4 curPosition, vec4 oldPosition, vec4 force, int globalVertexIndex, int localVertexIndex, int numVerticesInTheStrand, float dampingCoeff = 1.0f)
+vec4 Integrate(vec4 curPosition, vec4 oldPosition, vec4 force, int numVerticesInTheStrand, int vertexIndfloat,float dampingCoeff = 1.0f)
 {  
     vec4 outputPos = curPosition;
 
@@ -257,7 +260,7 @@ vec3 CapsuleCollision(vec4 curPosition, vec4 oldPosition, CollisionCapsule cc, f
         vec3 n = normalize(delta);
         vec3 vec = curPosition._xyz() - oldPosition._xyz();
         vec3 segN = normalize(segment);
-        vec3 vecTangent = segN * dot(vec, segN) ;
+        vec3 vecTangent = segN * dot(vec, segN);
         vec3 vecNormal = vec - vecTangent;
         newPos.x = oldPosition.x + vecTangent.x*friction + (vecNormal.x + n.x*radius - delta.x);
         newPos.y = oldPosition.y + vecTangent.y*friction + (vecNormal.y + n.y*radius - delta.y);
@@ -295,12 +298,12 @@ vec3 SphereCollision(vec4 curPosition, vec4 sphere)
 //  Updates the  hair vertex positions based on the physics simulation
 //
 //--------------------------------------------------------------------------------------
-void UpdateFinalVertexPositions(vec4 oldPosition, vec4 newPosition, int globalVertexIndex, int localVertexIndex, int numVerticesInTheStrand)
+void UpdateFinalVertexPositions(vec4 oldPosition, vec4 newPosition, int numVerticesInTheStrand, int vertexInd)
 { 
-    if ( localVertexIndex < numVerticesInTheStrand )
+    if ( vertexInd < numVerticesInTheStrand )
     {
-        vp[globalVertexIndex] = oldPosition;
-        v[globalVertexIndex * 3] = newPosition;
+        vp[vertexInd] = oldPosition;
+        v[vertexInd * 3] = newPosition;
     }        
 }
 
@@ -316,7 +319,7 @@ void UpdateFinalVertexPositions(vec4 oldPosition, vec4 newPosition, int globalVe
 //--------------------------------------------------------------------------------------
 void IntegrationAndGlobalShapeConstraints(int vertexInd)
 {
-    int globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
+    //int globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
     //CalcIndicesInVertexLevel(GIndex, GId.x, globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem);
     
     vec4 currentPos = vec4(0, 0, 0, 0); // position when this step starts. In other words, a position from the last step. 
@@ -345,10 +348,10 @@ void IntegrationAndGlobalShapeConstraints(int vertexInd)
     vec4 force = vec4(0, 0, 0, 0);
 
     if ( IsMovable(currentPos) )  
-        sharedPos[vertexInd] = Integrate(currentPos, oldPos, force, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, dampingCoeff); 
+		sharedPos[vertexInd] = Integrate(currentPos, oldPos, force, NUM_VERTS_PER_STRAND, vertexInd, dampingCoeff); 
     
     // update global position buffers
-    UpdateFinalVertexPositions(currentPos, sharedPos[vertexInd], globalVertexIndex, localVertexIndex, numVerticesInTheStrand);
+	UpdateFinalVertexPositions(currentPos, sharedPos[vertexInd], NUM_VERTS_PER_STRAND, vertexInd);
 }
 
 
@@ -361,14 +364,14 @@ void IntegrationAndGlobalShapeConstraints(int vertexInd)
 // One thread computes one strand.
 //
 //--------------------------------------------------------------------------------------
-void LocalShapeConstraints(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
+void LocalShapeConstraints(int vertexInd)
 {
-    int local_id = GIndex; 
-    int group_id = GId.x;
+    //int local_id = GIndex; 
+    //int group_id = GId.x;
 
-    int globalStrandIndex = THREAD_GROUP_SIZE*group_id + local_id;
+    //int globalStrandIndex = THREAD_GROUP_SIZE*group_id + local_id;
     int numVerticesInTheStrand = NUM_VERTS_PER_STRAND;
-    int globalRootVertexIndex = numVerticesInTheStrand * globalStrandIndex;
+    //int globalRootVertexIndex = numVerticesInTheStrand * globalStrandIndex;
 
     //--------------------------------------------
     // Local shape constraint for bending/twisting 
@@ -385,14 +388,14 @@ void LocalShapeConstraints(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
                 
         for ( int localVertexIndex = 1; localVertexIndex < numVerticesInTheStrand-1; localVertexIndex++ )
         {
-            globalVertexIndex = globalRootVertexIndex + localVertexIndex;
-            pos_plus_one = v[(globalVertexIndex + 1) * 3];
+            //globalVertexIndex = globalRootVertexIndex + localVertexIndex;
+            pos_plus_one = v[(localVertexIndex + 1) * 3];
 
             //--------------------------------
             // Update position i and i_plus_1
             //--------------------------------
             vec4 rotGlobalWorld = rotGlobal; 
-            vec3 orgPos_i_plus_1_InLocalFrame_i = RefVector[globalVertexIndex + bladeOffset + 1]._xyz(); 
+            vec3 orgPos_i_plus_1_InLocalFrame_i = RefVector[localVertexIndex + 1]._xyz(); 
             vec3 orgPos_i_plus_1_InGlobalFrame = MultQuaternionAndVector(rotGlobalWorld, orgPos_i_plus_1_InLocalFrame_i) + pos._xyz();
 
             vec3 del = (orgPos_i_plus_1_InGlobalFrame - pos_plus_one._xyz()) * stiffnessLSC * 0.5f ;
@@ -441,13 +444,13 @@ void LocalShapeConstraints(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
                 rotGlobal = MultQuaternionAndQuaternion(rotGlobal, localRot);
             }   
 
-            v[(vertexInd) * 3].x = pos.x;
-            v[(vertexInd) * 3].y = pos.y;    
-            v[(vertexInd) * 3].z = pos.z;    
+            v[(localVertexIndex) * 3].x = pos.x;
+            v[(localVertexIndex) * 3].y = pos.y;    
+            v[(localVertexIndex) * 3].z = pos.z;    
 
-            v[(vertexInd + 1) * 3].x = pos_plus_one.x;
-            v[(vertexInd + 1) * 3].y = pos_plus_one.y;
-            v[(vertexInd + 1) * 3].z = pos_plus_one.z;
+            v[(localVertexIndex + 1) * 3].x = pos_plus_one.x;
+            v[(localVertexIndex + 1) * 3].y = pos_plus_one.y;
+            v[(localVertexIndex + 1) * 3].z = pos_plus_one.z;
 
             pos_minus_one = pos;
             pos = pos_plus_one;
@@ -466,10 +469,10 @@ void LocalShapeConstraints(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
 // One thread computes one vertex.
 //
 //--------------------------------------------------------------------------------------
-void LengthConstriantsAndWind(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
+void LengthConstriantsAndWind(int vertexInd)
 {
-    int globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
-    CalcIndicesInVertexLevel(GIndex, GId.x, globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem);
+    //int globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
+    //CalcIndicesInVertexLevel(GIndex, GId.x, globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem);
         
     int numOfStrandsPerThreadGroup = NUM_STRANDS_PER_GROUP;
         
@@ -501,19 +504,19 @@ void LengthConstriantsAndWind(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
     //----------------------------
     // Enforce length constraints
     //----------------------------
-    int a = floor(numVerticesInTheStrand/2.0f);
-    int b = floor((numVerticesInTheStrand-1)/2.0f); 
+    int a = floor(NUM_VERTS_PER_STRAND/2.0f);
+    int b = floor((NUM_VERTS_PER_STRAND-1)/2.0f); 
         
     for ( int iterationE=0; iterationE < numELCIter; iterationE++ )
     {       
-        int sharedIndex = 2*localVertexIndex * numOfStrandsPerThreadGroup + localStrandIndex;
+        int sharedIndex = 2*vertexInd * numOfStrandsPerThreadGroup + vertexInd;
 
-        if( localVertexIndex < a )
+        if( vertexInd < a )
             ApplyDistanceConstraint(sharedPos[sharedIndex], sharedPos[sharedIndex+numOfStrandsPerThreadGroup], sharedLength[sharedIndex].x);
 
         //GroupMemoryBarrierWithGroupSync();
 
-        if( localVertexIndex < b )
+        if( vertexInd < b )
             ApplyDistanceConstraint(sharedPos[sharedIndex+numOfStrandsPerThreadGroup], sharedPos[sharedIndex+numOfStrandsPerThreadGroup*2], sharedLength[sharedIndex+numOfStrandsPerThreadGroup].x);
 
         //GroupMemoryBarrierWithGroupSync();
@@ -522,24 +525,24 @@ void LengthConstriantsAndWind(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
     //---------------------------------------
     // update global position buffers
     //---------------------------------------
-    if ( vertexInd < numVerticesInTheStrand )
+    if ( vertexInd < NUM_VERTS_PER_STRAND )
     v[vertexInd * 3] = sharedPos[vertexInd];
     
     return;
 }
 
 
-void CollisionAndTangents(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
+void CollisionAndTangents(int vertexInd)
 {
-    int globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
-    CalcIndicesInVertexLevel(GIndex, GId.x, globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem);
+    //int globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem;
+    //CalcIndicesInVertexLevel(GIndex, GId.x, globalStrandIndex, localStrandIndex, globalVertexIndex, localVertexIndex, numVerticesInTheStrand, indexForSharedMem);
 
     int numOfStrandsPerThreadGroup = NUM_STRANDS_PER_GROUP;
 
     //------------------------------
     // Copy data into shared memory
     //------------------------------
-    if (vertexInd < numVerticesInTheStrand )
+	if (vertexInd < NUM_VERTS_PER_STRAND )
     {
         sharedPos[vertexInd] = v[vertexInd * 3];
     }
@@ -553,9 +556,10 @@ void CollisionAndTangents(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
     {
         for ( int i = 0; i < NUM_OF_ROCKS; i++ )
         {
-            sharedPos[vertexInd].x = SphereCollision(sharedPos[indexForSharedMem], vec4(1,1,1,1)).x;
-            sharedPos[vertexInd].y = SphereCollision(sharedPos[indexForSharedMem], vec4(1,1,1,1)).y;
-            sharedPos[vertexInd].z = SphereCollision(sharedPos[indexForSharedMem], vec4(1,1,1,1)).z;
+			sp = sp + vec4(0.0f, 0.0f, 0.05f, 0.0f);
+            sharedPos[vertexInd].x = SphereCollision(sharedPos[vertexInd], sp).x;
+            sharedPos[vertexInd].y = SphereCollision(sharedPos[vertexInd], sp).y;
+            sharedPos[vertexInd].z = SphereCollision(sharedPos[vertexInd], sp).z;
         }
     }
 
@@ -570,16 +574,16 @@ void CollisionAndTangents(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
 
     if ( vertexInd == 0 )
     {
-        tangent = sharedPos[indexForSharedMem+numOfStrandsPerThreadGroup]._xyz() - sharedPos[indexForSharedMem]._xyz();
+        tangent = sharedPos[vertexInd+numOfStrandsPerThreadGroup]._xyz() - sharedPos[vertexInd]._xyz();
     }
-    else if ( vertexInd == numVerticesInTheStrand - 1 )
+	else if ( vertexInd == NUM_VERTS_PER_STRAND - 1 )
     {
-        tangent = sharedPos[indexForSharedMem]._xyz() - sharedPos[indexForSharedMem-numOfStrandsPerThreadGroup]._xyz();
+        tangent = sharedPos[vertexInd]._xyz() - sharedPos[vertexInd-numOfStrandsPerThreadGroup]._xyz();
     }
     else 
     {
-        vec3 t0 = sharedPos[indexForSharedMem+numOfStrandsPerThreadGroup]._xyz() - sharedPos[indexForSharedMem]._xyz();
-        vec3 t1 = sharedPos[indexForSharedMem]._xyz() - sharedPos[indexForSharedMem-numOfStrandsPerThreadGroup]._xyz();
+        vec3 t0 = sharedPos[vertexInd+numOfStrandsPerThreadGroup]._xyz() - sharedPos[vertexInd]._xyz();
+        vec3 t1 = sharedPos[vertexInd]._xyz() - sharedPos[vertexInd-numOfStrandsPerThreadGroup]._xyz();
         tangent = t0 + t1;
     }
 
@@ -587,19 +591,19 @@ void CollisionAndTangents(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
     float len = std::max(normal.Length(), 1e-7f);
     normal = normal / len;
 
-    v[globalVertexIndex * 3 + 2].x = normalize(tangent).x;
-    v[globalVertexIndex * 3 + 2].y = normalize(tangent).y;
-    v[globalVertexIndex * 3 + 2].z = normalize(tangent).z;
-    v[globalVertexIndex * 3 + 2].w = 1.0f - ballLeftTime;
+    v[vertexInd * 3 + 2].x = normalize(tangent).x;
+    v[vertexInd * 3 + 2].y = normalize(tangent).y;
+    v[vertexInd * 3 + 2].z = normalize(tangent).z;
+    v[vertexInd * 3 + 2].w = 1.0f - ballLeftTime;
 
-    v[globalVertexIndex * 3 + 1].x = normal.x;
-    v[globalVertexIndex * 3 + 1].y = normal.y;
-    v[globalVertexIndex * 3 + 1].z = normal.z;
+    v[vertexInd * 3 + 1].x = normal.x;
+    v[vertexInd * 3 + 1].y = normal.y;
+    v[vertexInd * 3 + 1].z = normal.z;
 
     //---------------------------------------
     // update global position buffers
     //---------------------------------------
-    if ( vertexInd < numVerticesInTheStrand )
+	if ( vertexInd < NUM_VERTS_PER_STRAND )
         {
             // This code would blend position towards initial based on fractional time 
             // left after leaving the cell.  However, it would then feed into the simulation again,
@@ -607,7 +611,7 @@ void CollisionAndTangents(int GIndex, vec3 GId, vec3 DTid, int vertexInd)
             // the ramped local constraint idea that Dongsoo suggested.
             // g_HairVertices[globalVertexIndex * 3] = sharedPos[indexForSharedMem] * (1.0f - ballLeftTime) + g_InitialHairPositions[globalVertexIndex] * ballLeftTime;
                 
-            v[globalVertexIndex * 3] = sharedPos[indexForSharedMem];
+            v[vertexInd * 3] = sharedPos[vertexInd];
         }
     
     return;
