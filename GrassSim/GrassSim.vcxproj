@@ -93,6 +93,7 @@
     <ClInclude Include="Matrix44.h" />
     <ClInclude Include="myFloat.h" />
     <ClInclude Include="Quaternion.h" />
+    <ClInclude Include="Simulation.h" />
     <ClInclude Include="Transform.h" />
     <ClInclude Include="Vector3D.h" />
   </ItemGroup>

@@ -1,24 +1,20 @@
-#include <iostream>
-#include <random>
-#include "mathutils.h"
-#include "Vector3D.h"
-#include "Transform.h"
+#include "grass.h"
 using namespace std;
 
 #define NUM_VERTICES_PER_BLADE 16
 
 #pragma warning (disable: 4996)
 
-float *vertices;
-int *indices;
-float *verticesPre;
-float *verticesNex;
+float vertices[128*12];
+int indices[128*12];
+float verticesPre[128];
+float verticesNex[128];
 
 
-float *RestLength;
-vec4 *Binormal;
-vec4 *RefVector;
-vec4 *GlobalFrames;
+float RestLength[128];
+vec4 Binormal[128];
+vec4 RefVector[128];
+vec4 GlobalFrames[128];
 
 
 
@@ -207,22 +203,22 @@ void generateGrass(int verticesNum)
 
 	int indicesNum = (verticesNum - 1) * 6;
 
-	vertices = new float[verticesNum * 12];// pos (4), tangent(4), normaldistance(4)
-    verticesPre = new float[verticesNum * 12];
-	indices = new int[indicesNum];
+	//vertices = new float[verticesNum * 12];// pos (4), tangent(4), normaldistance(4)
+ //   verticesPre = new float[verticesNum * 12];
+	//indices = new int[indicesNum];
 
-    memset(vertices, 0, sizeof(float)* verticesNum *12);
+    /*memset(vertices, 0, sizeof(float)* verticesNum *12);
     memset(verticesPre, 0, sizeof(float)* verticesNum *12);
-    memset(indices, 0, sizeof(float)* verticesNum *12);
+    memset(indices, 0, sizeof(float)* verticesNum *12);*/
 
-	RestLength = new float[verticesNum];
-	Binormal = new vec4[1];
-	RefVector = new vec4[verticesNum];
-	GlobalFrames = new vec4[verticesNum];
+	//RestLength = new float[verticesNum];
+	//Binormal = new vec4[1];
+	//RefVector = new vec4[verticesNum];
+	//GlobalFrames = new vec4[verticesNum];
 
-    memset(RestLength, 0, sizeof(float) * verticesNum);
-    memset(RefVector, 0, sizeof(float) * verticesNum);
-    memset(GlobalFrames, 0, sizeof(float) * verticesNum);
+    //memset(RestLength, 0, sizeof(float) * 128);
+    //memset(RefVector, 0, sizeof(float) * 128);
+    //memset(GlobalFrames, 0, sizeof(float) * 128);
 
 	int *ind = indices;
 	for(int j = 0; j < verticesNum-1; j++)

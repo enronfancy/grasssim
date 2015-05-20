@@ -68,5 +68,8 @@
     <ClInclude Include="mathutils.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="Simulation.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

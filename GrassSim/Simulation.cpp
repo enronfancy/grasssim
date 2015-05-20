@@ -1,7 +1,4 @@
-#include "Grass.h"
-//#include "myFloat.h"
-#include "mathutils.h"
-#include <math.h>
+#include "simulation.h"
 
 #define FACTOR 2
 #define SCENE_SIZE_FACTOR 1
@@ -14,18 +11,19 @@
 
 #define MAX_COLLISION_BALLS 64
 
-static vec4 sp = vec4(0,0,-2, 0.25);
+static vec4 sp = vec4(0,0,-200000, 0.25);
 
-extern float *vertices;
-extern float *verticesPre;
-extern int *indices;
+extern float vertices[128*12];
+extern int indices[128*12];
+extern float verticesPre[128];
+extern float verticesNex[128];
 
 
 
-extern float *RestLength;
-extern vec4 *Binormal;
-extern vec4 *RefVector;
-extern vec4 *GlobalFrames;
+extern float RestLength[128];
+extern vec4 Binormal[128];
+extern vec4 RefVector[128];
+extern vec4 GlobalFrames[128];
 
 vec4 sharedPos[128];
 vec4 sharedLength[128];
@@ -60,7 +58,6 @@ bool IsMovable(vec4 particle)
         return true;
     return false;      
 }
-
 
 vec2 ConstraintMultiplier(vec4 particle0, vec4 particle1)
 {
@@ -157,7 +154,7 @@ vec4 NormalizeQuaternion(vec4& q)
     return q;
 }
 
-void ApplyDistanceConstraint(vec4& pos0, vec4& pos1, float targetDistance, float stiffness = 1.0)
+void ApplyDistanceConstraint(vec4& pos0, vec4& pos1, float targetDistance, float stiffness)
 {
     vec3 delta = vec3(pos1.x - pos0.x, pos1.y - pos0.y, pos1.z - pos0.z);
 	float distance = std::max(delta.Length(), 1e-7f);
@@ -189,7 +186,7 @@ void CalcIndicesInVertexLevel(int local_id, int group_id, int &globalStrandIndex
     globalVertexIndex = globalStrandIndex * numVerticesInTheStrand + localVertexIndex;
 }
 
-vec4 Integrate(vec4 curPosition, vec4 oldPosition, vec4 force, int numVerticesInTheStrand, int vertexIndfloat,float dampingCoeff = 1.0f)
+vec4 Integrate(vec4 curPosition, vec4 oldPosition, vec4 force, int numVerticesInTheStrand, int vertexIndfloat,float dampingCoeff)
 {  
     vec4 outputPos = curPosition;
 
@@ -213,7 +210,7 @@ struct CollisionCapsule
 //  Moves the position based on collision with capsule
 //
 //--------------------------------------------------------------------------------------
-vec3 CapsuleCollision(vec4 curPosition, vec4 oldPosition, CollisionCapsule cc, float friction = 0.4f)
+vec3 CapsuleCollision(vec4 curPosition, vec4 oldPosition, CollisionCapsule cc, float friction)
 {
     vec3 newPos = vec3(curPosition.x,curPosition.y,curPosition.z);
     const float radius = cc.p1.w;
