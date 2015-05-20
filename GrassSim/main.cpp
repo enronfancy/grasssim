@@ -2,6 +2,7 @@
 #include "myFloat.h"
 #include "Grass.h"
 #include "simulation.h"
+#include "draw.h"
 using namespace std;
 
 extern float vertices[128*12];
@@ -60,6 +61,15 @@ int main()
 		cout<<endl;
 	}
 
+
+	//glutInit();
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
+    glutInitWindowSize (200, 200);
+    glutInitWindowPosition (10, 10);
+    glutCreateWindow( "Point examples" );
+    glutDisplayFunc( RenderScene );
+    SetupRC();
+    glutMainLoop();
 
 	return 0;
 }
